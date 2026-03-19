@@ -113,11 +113,21 @@ def init_db(database_url: str):
 def bulk_insert_jobs(database_url: str, jobs, keyword, github_user):
     new = 0
     dupe = 0
+    skipped = 0
     now = datetime.utcnow().isoformat()
 
     with get_conn(database_url) as conn:
         with conn.cursor() as c:
             for job in jobs:
+                # Normalize upstream payloads that send `job_id` instead of `id`.
+                if "id" not in job and job.get("job_id"):
+                    job["id"] = str(job["job_id"])
+
+                # A stable unique id is required for de-duplication.
+                if not job.get("id"):
+                    skipped += 1
+                    continue
+
                 job["keyword"] = keyword
                 job["scraped_at"] = job.get("scraped_at") or now
                 job["alerted"] = 0
@@ -143,8 +153,8 @@ def bulk_insert_jobs(database_url: str, jobs, keyword, github_user):
 
         conn.commit()
 
-    log.info("[%s] %s new, %s dupes", github_user, new, dupe)
-    return {"new": new, "dupes": dupe, "total": len(jobs)}
+    log.info("[%s] %s new, %s dupes, %s skipped", github_user, new, dupe, skipped)
+    return {"new": new, "dupes": dupe, "skipped": skipped, "total": len(jobs)}
 
 
 def get_unalerted_jobs(database_url: str):
